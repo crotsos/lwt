@@ -1,0 +1,17 @@
+# -*- conf -*-
+
+<**/*.ml>: syntax_camlp4o, pkg_camlp4
+<**/*.ml>: pa_lwt_options, pa_lwt, pa_lwt_log, pa_optcomp
+<syntax/*.ml>: -pa_lwt_options, -pa_lwt, -pa_lwt_log, -pa_optcomp
+
+<src/top/{lwt_toplevel.*,toplevel.*,toplevel_temp.*}>: use_compiler_libs, pkg_text, pkg_text.bigarray, pkg_findlib, pkg_react, pkg_unix, pkg_bigarray
+
+<src/{unix,glib,text}/*>: use_stubs
+
+# GLib bindings:
+<src/glib/lwt-glib.*>: use_C_glib
+<src/glib/liblwt-glib.*>: use_C_glib
+<src/glib/lwt_glib_stubs.*>: use_C_glib
+
+# OASIS_START
+# OASIS_STOP
