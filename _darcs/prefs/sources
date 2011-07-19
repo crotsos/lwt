@@ -1,0 +1,6 @@
+repo:http://ocsigen.org/darcs/lwt
+thisrepo:/home/itz/lwt
+cache:/home/itz/.darcs/cache
+repo:/home/glondu/lwt_0
+thisrepo:/var/www/darcs/lwt
+cache:/home/glondu/.darcs/cache
