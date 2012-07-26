@@ -39,8 +39,82 @@ val from : (unit -> 'a option Lwt.t) -> 'a t
       called each time more input is needed, and the stream ends when
       [f] returns [None]. *)
 
+val from_direct : (unit -> 'a option) -> 'a t
+  (** [from_direct f] does the same as {!from} but with a function
+      that does not return a thread. It is better than wrapping [f]
+      into a function which return a thread. *)
+
+exception Closed
+  (** Exception raised by the push function of a push-stream when
+      pushing an element after the end of stream ([= None]) have been
+      pushed. *)
+
 val create : unit -> 'a t * ('a option -> unit)
-  (** [create ()] returns a new stream and a push function *)
+  (** [create ()] returns a new stream and a push function. *)
+
+val create_with_reference : unit -> 'a t * ('a option -> unit) * ('b -> unit)
+  (** [create_with_reference ()] returns a new stream and a push
+      function. The last function allows to set a reference to an
+      external source. This prevent the external source from being
+      garbage collected.
+
+      For example, to convert a reactive event to a stream:
+
+      {[
+        let stream, push, set_ref = Lwt_stream.create_with_reference () in
+        set_ref (map_event push event)
+      ]}
+  *)
+
+exception Full
+  (** Exception raised by the push function of a bounded push-stream
+      when the stream queue is full and a thread is already waiting to
+      push an element. *)
+
+(** Type of sources for bounded push-streams. *)
+class type ['a] bounded_push = object
+  method size : int
+    (** Size of the stream. *)
+
+  method resize : int -> unit
+    (** Change the size of the stream queue. Note that the new size
+        can smaller than the current stream queue size.
+
+        It raises [Invalid_argument] if [size < 0]. *)
+
+  method push : 'a -> unit Lwt.t
+    (** Pushes a new element to the stream. If the stream is full then
+        it will block until one element is consumed. If another thread
+        is already blocked on {!push}, it raises {!Full}. *)
+
+  method close : unit
+    (** Closes the stream. Any thread currently blocked on {!push}
+        will fail with {!Closed}. *)
+
+  method count : int
+    (** Number of elements in the stream queue. *)
+
+  method blocked : bool
+    (** Is a thread is blocked on {!push} ? *)
+
+  method closed : bool
+    (** Is the stream closed ? *)
+
+  method set_reference : 'a. 'a -> unit
+    (** Set the reference to an external source. *)
+end
+
+val create_bounded : int -> 'a t * 'a bounded_push
+  (** [create_bounded size] returns a new stream and a bounded push
+      source. The stream can hold a maximum of [size] elements.  When
+      this limit is reached, pushing a new element will block until
+      one is consumed.
+
+      Note that you cannot clone or parse (with {!parse}) a bounded
+      stream. These functions will raise [Invalid_argument] if you try
+      to do so.
+
+      It raises [Invalid_argument] if [size < 0]. *)
 
 val of_list : 'a list -> 'a t
   (** [of_list l] creates a stream returning all elements of [l] *)
@@ -68,7 +142,9 @@ val clone : 'a t -> 'a t
         # lwt y = Lwt_stream.next st2;;
         val y : int = 1
       ]}
-  *)
+
+      It raises [Invalid_argument] if [st] is a bounded
+      push-stream. *)
 
 (** {6 Destruction} *)
 
@@ -111,10 +187,9 @@ val next : 'a t -> 'a Lwt.t
       fail with {!Empty} if the stream is empty. *)
 
 val last_new : 'a t -> 'a Lwt.t
-  (** [next_new st] if no element are available on [st] without
-      sleeping, then it is the same as [next st]. Otherwise it removes
-      all elements of [st] that are ready except the last one, and
-      return it.
+  (** [last_new st] returns the last element that can be obtained
+      without sleepping, or wait for one if no one is already
+      available.
 
       If fails with {!Empty} if the stream has no more elements *)
 
@@ -220,11 +295,26 @@ val concat : 'a t t -> 'a t
 val flatten : 'a list t -> 'a t
   (** [flatten st = map_list (fun l -> l) st] *)
 
+(** A value or an error. *)
+type 'a result =
+  | Value of 'a
+  | Error of exn
+
+val map_exn : 'a t -> 'a result t
+  (** [map_exn s] returns a stream that captures all exceptions raised
+      by the source of the stream (the function passed to {!from}).
+
+      Note that for push-streams (as returned by {!create}) all
+      elements of the mapped streams are values. *)
+
 (** {6 Parsing} *)
 
 val parse : 'a t -> ('a t -> 'b Lwt.t) -> 'b Lwt.t
   (** [parse st f] parses [st] with [f]. If [f] raise an exception,
-      [st] is restored to its previous state. *)
+      [st] is restored to its previous state.
+
+      It raises [Invalid_argument] if [st] is a bounded
+      push-stream. *)
 
 (** {6 Misc} *)
 
@@ -235,8 +325,6 @@ val hexdump : char t -> string t
       Basically, here is a simple implementation of [hexdump -C]:
 
       {[
-        open Lwt
-        open Lwt_io
-        let () = Lwt_main.run (write_lines stdout (Lwt_stream.hexdump (read_lines stdin)))
+        let () = Lwt_main.run (Lwt_io.write_lines Lwt_io.stdout (Lwt_stream.hexdump (Lwt_io.read_lines Lwt_io.stdin)))
       ]}
   *)

@@ -13,7 +13,7 @@ Requirements:
  * ocaml with ocamlbuild (>= 3.11.0)
  * findlib
  * react (from http://erratique.ch/software/react)
- * libev (from http://software.schmorp.de/pkg/libev.html)
+ * [optionnal] libev (from http://software.schmorp.de/pkg/libev.html)
  * [optionnal] ocaml-text (needed for the enhanced toplevel)
  * [optionnal] ocamlssl (>= 0.4.0) (ocamlssl needs openssl) (>= 0.4.1 for MacOS)
  * [optionnal] glib-2.0 developpement files and pkg-config
@@ -33,6 +33,8 @@ Instructions:
      You can add '--enable-<lib>' to enable compilation of
      the sub-library <lib>. The flag '--enable-all' will
      enable everything.
+     In order to compile without libev support you must add
+     '--disable-libev'.
  * run "ocaml setup.ml -build" to compile
  * run "ocaml setup.ml -install" as root to install compiled libraries
  * run "ocaml setup.ml -uninstall" as root to uninstall them
@@ -42,6 +44,16 @@ installed by default.
 
 If you get the development version you need to obtain oasis
 (http://oasis.forge.ocamlcore.org/).
+
+If you want to build the toplevel you have to install compiler
+libraries, under debian it is the package
+ocaml-compiler-libs. Otherwise you can add a symlink like that:
+
+  $ ln -s <ocaml sources> $(ocamlc -where)/compiler-libs
+
+Note that the utop project replaces the Lwt toplevel:
+
+  https://forge.ocamlcore.org/projects/utop/
 
 --------------------------------------------------------------------------
 

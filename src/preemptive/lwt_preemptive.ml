@@ -87,7 +87,7 @@ let rec worker_loop worker =
   if worker.reuse then worker_loop worker
 
 (* create a new worker: *)
-let make_worker _ =
+let make_worker () =
   incr threads_count;
   let worker = {
     task_channel = Event.new_channel ();
@@ -106,23 +106,19 @@ let add_worker worker =
         wakeup w worker
 
 (* Wait for worker to be available, then return it: *)
-let rec get_worker _ =
+let rec get_worker () =
   if not (Queue.is_empty workers) then
     return (Queue.take workers)
   else if !threads_count < !max_threads then
     return (make_worker ())
-  else begin
-    let (res, w) = Lwt.task () in
-    let node = Lwt_sequence.add_r w waiters in
-    Lwt.on_cancel res (fun _ -> Lwt_sequence.remove node);
-    res
-  end
+  else
+    Lwt.add_task_r waiters
 
 (* +-----------------------------------------------------------------+
    | Initialisation, and dynamic parameters reset                    |
    +-----------------------------------------------------------------+ *)
 
-let get_bounds _ = (!min_threads, !max_threads)
+let get_bounds () = (!min_threads, !max_threads)
 
 let set_bounds (min, max) =
   if min < 0 || max < min then invalid_arg "Lwt_preemptive.set_bounds";
@@ -141,42 +137,37 @@ let init min max errlog =
   error_log := errlog;
   set_bounds (min, max)
 
-let simple_init _ =
+let simple_init () =
   if not !initialized then begin
     initialized := true;
     set_bounds (0, 4)
   end
 
-let nbthreads _ = !threads_count
-let nbthreadsqueued _ = Lwt_sequence.fold_l (fun _ x -> x + 1) waiters 0
-let nbthreadsbusy _ = !threads_count - Queue.length workers
+let nbthreads () = !threads_count
+let nbthreadsqueued () = Lwt_sequence.fold_l (fun _ x -> x + 1) waiters 0
+let nbthreadsbusy () = !threads_count - Queue.length workers
 
 (* +-----------------------------------------------------------------+
    | Detaching                                                       |
    +-----------------------------------------------------------------+ *)
 
+let init_result = Lwt.make_error (Failure "Lwt_preemptive.detach")
+
 let detach f args =
   simple_init ();
-  let result = ref `Nothing in
+  let result = ref init_result in
   (* The task for the worker thread: *)
   let task () =
     try
-      result := `Success(f args)
+      result := Lwt.make_value (f args)
     with exn ->
-      result := `Failure exn
+      result := Lwt.make_error exn
   in
   lwt worker = get_worker () in
   let waiter, wakener = wait () in
   let id =
     Lwt_unix.make_notification ~once:true
-      (fun () ->
-         match !result with
-           | `Nothing ->
-               wakeup_exn wakener (Failure "Lwt_preemptive.detach")
-           | `Success value ->
-               wakeup wakener value
-           | `Failure exn ->
-               wakeup_exn wakener exn)
+      (fun () -> Lwt.wakeup_result wakener !result)
   in
   try_lwt
     (* Send the id and the task to the worker: *)
@@ -193,3 +184,52 @@ let detach f args =
       Thread.join worker.thread
     end;
     return ()
+
+(* +-----------------------------------------------------------------+
+   | Running Lwt threads in the main thread                          |
+   +-----------------------------------------------------------------+ *)
+
+type 'a result =
+  | Value of 'a
+  | Error of exn
+
+(* Queue of [unit -> unit Lwt.t] functions. *)
+let jobs = Queue.create ()
+
+(* Mutex to protect access to [jobs]. *)
+let jobs_mutex = Mutex.create ()
+
+let job_notification =
+  Lwt_unix.make_notification
+    (fun () ->
+       (* Take the first job. The queue is never empty at this
+          point. *)
+       Mutex.lock jobs_mutex;
+       let thunk = Queue.take jobs in
+       Mutex.unlock jobs_mutex;
+       ignore (thunk ()))
+
+let run_in_main f =
+  let channel = Event.new_channel () in
+  (* Create the job. *)
+  let job () =
+    (* Execute [f] and wait for its result. *)
+    lwt result =
+      try_bind f
+        (fun ret -> return (Value ret))
+        (fun exn -> return (Error exn))
+    in
+    (* Send the result. *)
+    Event.sync (Event.send channel result);
+    return ()
+  in
+  (* Add the job to the queue. *)
+  Mutex.lock jobs_mutex;
+  Queue.add job jobs;
+  Mutex.unlock jobs_mutex;
+  (* Notify the main thread. *)
+  Lwt_unix.send_notification job_notification;
+  (* Wait for the result. *)
+  match Event.sync (Event.receive channel) with
+    | Value ret -> ret
+    | Error exn -> raise exn

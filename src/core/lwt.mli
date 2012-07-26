@@ -3,6 +3,7 @@
  * Interface Lwt
  * Copyright (C) 2005-2008 Jérôme Vouillon
  * Laboratoire PPS - CNRS Université Paris Diderot
+ *               2009-2012 Jérémie Dimino
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as
@@ -36,7 +37,8 @@
     Note that inside a Lwt thread, exceptions must be raised with
     {!fail} instead of [raise]. Also the [try ... with ...]
     construction will not catch Lwt errors. You must use {!catch}
-    instead.
+    instead. You can also use {!wrap} for functions that may raise
+    normal exception.
 
     Lwt also provides the syntax extension {!Pa_lwt} to make code
     using Lwt more readable.
@@ -86,6 +88,23 @@ val (>|=) : 'a t -> ('a -> 'b) -> 'b t
 val (=|<) : ('a -> 'b) -> 'a t -> 'b t
   (** [f =|< m] is [map f m] *)
 
+(** {8 Pre-allocated threads} *)
+
+val return_unit : unit t
+  (** [return_unit = return ()] *)
+
+val return_none : 'a option t
+  (** [return_none = return None] *)
+
+val return_nil : 'a list t
+  (** [return_nil = return \[\]] *)
+
+val return_true : bool t
+  (** [return_true = return true] *)
+
+val return_false : bool t
+  (** [return_false = return false] *)
+
 (** {6 Thread storage} *)
 
 type 'a key
@@ -120,6 +139,48 @@ val try_bind : (unit -> 'a t) -> ('a -> 'b t) -> (exn -> 'b t) -> 'b t
 val finalize : (unit -> 'a t) -> (unit -> unit t) -> 'a t
   (** [finalize f g] returns the same result as [f ()] whether it
       fails or not. In both cases, [g ()] is executed after [f]. *)
+
+val wrap : (unit -> 'a) -> 'a t
+  (** [wrap f] calls [f] and transform the result into a monad. If [f]
+      raise an exception, it is catched by Lwt.
+
+      This is actually the same as:
+
+      {[
+        try
+          return (f ())
+        with exn ->
+          fail exn
+      ]}
+  *)
+
+val wrap1 : ('a -> 'b) -> 'a -> 'b t
+  (** [wrap1 f x] applies [f] on [x] and returns the result as a
+      thread. If the application of [f] to [x] raise an exception it
+      is catched and a thread is returned.
+
+      Note that you must use {!wrap} instead of {!wrap1} if the
+      evaluation of [x] may raise an exception.
+
+      for example the following code is not ok:
+
+      {[
+        wrap1 f (Hashtbl.find table key)
+      ]}
+
+      you should write instead:
+
+      {[
+        wrap (fun () -> f (Hashtbl.find table key))
+      ]}
+  *)
+
+val wrap2 : ('a -> 'b -> 'c) -> 'a -> 'b -> 'c t
+val wrap3 : ('a -> 'b -> 'c -> 'd) -> 'a -> 'b -> 'c -> 'd t
+val wrap4 : ('a -> 'b -> 'c -> 'd -> 'e) -> 'a -> 'b -> 'c -> 'd -> 'e t
+val wrap5 : ('a -> 'b -> 'c -> 'd -> 'e -> 'f) -> 'a -> 'b -> 'c -> 'd -> 'e -> 'f t
+val wrap6 : ('a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g) -> 'a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g t
+val wrap7 : ('a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g -> 'h) -> 'a -> 'b -> 'c -> 'd -> 'e -> 'f -> 'g -> 'h t
 
 (** {6 Multi-threads composition} *)
 
@@ -158,17 +219,30 @@ val ( <?> ) : 'a t -> 'a t -> 'a t
 val ( <&> ) : unit t -> unit t -> unit t
   (** [t <&> t'] is the same as [join [t; t']] *)
 
-val ignore_result : 'a t -> unit
-  (** [ignore_result t] start the thread [t] and ignores its result
-      value if the thread terminates sucessfully.  However, if the
-      thread [t] fails, the exception is raised instead of being
-      ignored.
+val async : (unit -> 'a t) -> unit
+  (** [async f] starts a thread without waiting for the result. If it
+      fails (now or later), the exception is given to
+      {!async_exception_hook}.
 
-      You should use this function if you want to start a thread and
-      don't care what its return value is, nor when it terminates (for
-      instance, because it is looping).  Note that if the thread [t]
-      yields and later fails, the exception will not be raised at this
-      point in the program. *)
+      You should use this function if you want to start a thread that
+      might fail and don't care what its return value is, nor when it
+      terminates (for instance, because it is looping). *)
+
+val ignore_result : 'a t -> unit
+  (** [ignore_result t] is like [Pervasives.ignore t] except that:
+
+      - if [t] already failed, it raises the exception now,
+      - if [t] is sleeping and fails later, the exception will be
+        given to {!async_exception_hook}. *)
+
+val async_exception_hook : (exn -> unit) ref
+  (** Function called when a asynchronous exception is thrown.
+
+      The default behavior is to print an error message with a
+      backtrace if available and to exit the program.
+
+      The behavior is undefined if this function raise an
+      exception. *)
 
 (** {6 Sleeping and resuming} *)
 
@@ -192,14 +266,34 @@ val wakeup_exn : 'a u -> exn -> unit
 
 val wakeup_later : 'a u -> 'a -> unit
   (** Same as {!wakeup} but it is not guaranteed that the thread will
-      be wakeup immediately. *)
+      be woken up immediately. *)
 
 val wakeup_later_exn : 'a u -> exn -> unit
   (** Same as {!wakeup_exn} but it is not guaranteed that the thread
-      will be wakeup immediately. *)
+      will be woken up immediately. *)
 
 val waiter_of_wakener : 'a u -> 'a t
   (** Returns the thread associated to a wakener. *)
+
+type +'a result
+  (** Either a value of type ['a], either an exception. *)
+
+val make_value : 'a -> 'a result
+  (** [value x] creates a result containing the value [x]. *)
+
+val make_error : exn -> 'a result
+  (** [error e] creates a result containing the exception [e]. *)
+
+val of_result : 'a result -> 'a t
+  (** Returns a thread from a result. *)
+
+val wakeup_result : 'a u -> 'a result -> unit
+  (** [wakeup_result t r] makes the sleeping thread [t] terminate with
+      the result [r]. *)
+
+val wakeup_later_result : 'a u -> 'a result -> unit
+  (** Same as {!wakeup_result} but it is not guaranteed that the
+      thread will be woken up immediately. *)
 
 (** {6 Threads state} *)
 
@@ -215,6 +309,9 @@ type 'a state =
 val state : 'a t -> 'a state
   (** [state t] returns the state of a thread *)
 
+val is_sleeping : 'a t -> bool
+  (** [is_sleeping t] returns [true] iff [t] is sleeping. *)
+
 (** {6 Cancelable threads} *)
 
 (** Cancelable threads are the same as regular threads except that
@@ -228,8 +325,21 @@ val task : unit -> 'a t * 'a u
       with [task] can be canceled. *)
 
 val on_cancel : 'a t -> (unit -> unit) -> unit
-  (** [on_cancel t f] executes [f] when [t] is canceled. This is the
-      same as catching [Canceled]. *)
+  (** [on_cancel t f] executes [f] when [t] is canceled. [f] will be
+      executed before all other threads waiting on [t].
+
+      If [f] raises an exception it is given to
+      {!async_exception_hook}. *)
+
+val add_task_r : 'a u Lwt_sequence.t -> 'a t
+  (** [add_task_r seq] creates a sleeping thread, adds its wakener to
+      the right of [seq] and returns its waiter. When the thread is
+      canceled, it is removed from [seq]. *)
+
+val add_task_l : 'a u Lwt_sequence.t -> 'a t
+  (** [add_task_l seq] creates a sleeping thread, adds its wakener to
+      the left of [seq] and returns its waiter. When the thread is
+      canceled, it is removed from [seq]. *)
 
 val cancel : 'a t -> unit
   (** [cancel t] cancels the threads [t]. This means that the deepest
@@ -265,6 +375,10 @@ val protected : 'a t -> 'a t
       as [thread] except that cancelling it does not cancel
       [thread]. *)
 
+val no_cancel : 'a t -> 'a t
+  (** [no_cancel thread] creates a thread which behave as [thread]
+      except that it cannot be canceled. *)
+
 (** {6 Pause} *)
 
 val pause : unit -> unit t
@@ -280,12 +394,12 @@ val wakeup_paused : unit -> unit
       main loop. You usually do not have to call it directly, except
       if you are writing a custom scheduler.
 
-      Note that if a paused thread resume and pause again, it will not
-      be wakeup at this point. *)
+      Note that if a paused thread resumes and pauses again, it will not
+      be woken up at this point. *)
 
 val paused_count : unit -> int
-  (** [paused_count ()] returns the number of thread currently
-      paused. *)
+  (** [paused_count ()] returns the number of currently paused
+      threads. *)
 
 val register_pause_notifier : (int -> unit) -> unit
   (** [register_pause_notifier f] register a function [f] that will be
@@ -297,25 +411,22 @@ val register_pause_notifier : (int -> unit) -> unit
 
 val on_success : 'a t -> ('a -> unit) -> unit
   (** [on_success t f] executes [f] when [t] terminates without
-      failing. This is the same as:
-
-      {[
-        ignore_result (bind t (fun x -> f x; return ()))
-      ]}
-
-      but a bit more efficient.
- *)
+      failing. If [f] raises an exception it is given to
+      {!async_exception_hook}. *)
 
 val on_failure : 'a t -> (exn -> unit) -> unit
-  (** [on_failure t f] executes [f] when [t] terminates and
-      fails. This is the same as:
+  (** [on_failure t f] executes [f] when [t] terminates and fails. If
+      [f] raises an exception it is given to
+      {!async_exception_hook}. *)
 
-      {[
-        ignore_result (catch t (fun e -> f e; return ()))
-      ]}
+val on_termination : 'a t -> (unit -> unit) -> unit
+  (** [on_termination t f] executes [f] when [t] terminates. If [f]
+      raises an exception it is given to {!async_exception_hook}. *)
 
-      but a bit more efficient.
-  *)
+val on_any : 'a t -> ('a -> unit) -> (exn -> unit) -> unit
+  (** [on_any t f g] executes [f] or [g] when [t] terminates. If [f]
+      or [g] raises an exception it is given to
+      {!async_exception_hook}. *)
 
 (**/**)
 

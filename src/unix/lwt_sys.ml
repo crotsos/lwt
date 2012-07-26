@@ -26,7 +26,7 @@ exception Not_available of string
 
 let () = Callback.register_exception "lwt:not-available" (Not_available "")
 
-let windows = Sys.os_type <> "Unix"
+let windows = Sys.os_type = "Win32"
 
 type feature =
     [ `wait4
@@ -39,7 +39,8 @@ type feature =
     | `get_credentials
     | `mincore
     | `madvise
-    | `fdatasync ]
+    | `fdatasync
+    | `libev ]
 
 let have = function
   | `wait4
@@ -53,6 +54,7 @@ let have = function
   | `fd_passing -> <:optcomp< HAVE_FD_PASSING >>
   | `get_credentials -> <:optcomp< HAVE_GET_CREDENTIALS >>
   | `fdatasync -> <:optcomp< HAVE_FDATASYNC >>
+  | `libev -> <:optcomp< HAVE_LIBEV >>
 
 type byte_order = Little_endian | Big_endian
 

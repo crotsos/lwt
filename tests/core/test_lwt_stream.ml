@@ -34,9 +34,15 @@ let suite = suite "lwt_stream" [
        let t2 = Lwt_stream.next stream in
        let t3 = Lwt_stream.next stream in
        lwt () = Lwt_mvar.put mvar 1 in
-       lwt () = Lwt_mvar.put mvar 2 in
-       lwt () = Lwt_mvar.put mvar 3 in
        lwt x1 = t1 and x2 = t2 and x3 = t3 in
+       return ([x1; x2; x3] = [1; 1; 1]));
+
+  test "of_list"
+    (fun () ->
+       let stream = Lwt_stream.of_list [1; 2; 3] in
+       lwt x1 = Lwt_stream.next stream in
+       lwt x2 = Lwt_stream.next stream in
+       lwt x3 = Lwt_stream.next stream in
        return ([x1; x2; x3] = [1; 2; 3]));
 
   test "clone"
@@ -78,6 +84,28 @@ let suite = suite "lwt_stream" [
        push None;
        let t = Lwt_stream.next stream in
        return (Lwt.state t = Fail Lwt_stream.Empty));
+
+  test "create_bounded"
+    (fun () ->
+       let stream, push = Lwt_stream.create_bounded 3 in
+       let acc = true in
+       let acc = acc && state (push#push 1) = Return () in
+       let acc = acc && state (push#push 2) = Return () in
+       let acc = acc && state (push#push 3) = Return () in
+       let t = push#push 4 in
+       let acc = acc && state t = Sleep in
+       let acc = acc && state (push#push 5) = Fail Lwt_stream.Full in
+       let acc = acc && state (push#push 6) = Fail Lwt_stream.Full in
+       let acc = acc && state (Lwt_stream.get stream) = Return (Some 1) in
+       (* Lwt_stream uses wakeup_later so we have to wait a bit. *)
+       lwt () = Lwt_unix.yield () in
+       let acc = acc && state t = Return () in
+       let acc = acc && state (Lwt_stream.get stream) = Return (Some 2) in
+       let acc = acc && state (push#push 7) = Return () in
+       push#close;
+       let acc = acc && state (push#push 8) = Fail Lwt_stream.Closed in
+       let acc = acc && state (Lwt_stream.to_list stream) = Return [3; 4; 7] in
+       return acc);
 
   test "get_while"
     (fun () ->
@@ -173,6 +201,15 @@ let suite = suite "lwt_stream" [
        let t' = Lwt_stream.next stream in
        return (state t' = Return 1));
 
+  test "cancel push stream 3"
+    (fun () ->
+       let stream, push = Lwt_stream.create () in
+       let t1 = Lwt_stream.next stream in
+       let t2 = Lwt_stream.next stream in
+       cancel t1;
+       push (Some 1);
+       return (state t1 = Fail Canceled && state t2 = Return 1));
+
   (* check if the push function keeps references to the elements in
      the stream *)
   test "push and GC"
@@ -218,4 +255,25 @@ let suite = suite "lwt_stream" [
        (* We have that to force caml to keep a reference on [push]. *)
        push (Some(ref 4));
        return true);
+
+  test "map_exn"
+    (fun () ->
+       let open Lwt_stream in
+       let l = [Value 1; Error Exit; Error (Failure "plop"); Value 42; Error End_of_file] in
+       let q = ref l in
+       let stream =
+         Lwt_stream.from
+           (fun () ->
+              match !q with
+                | [] ->
+                    return None
+                | Value x :: l ->
+                    q := l;
+                    return (Some x)
+                | Error e :: l ->
+                    q := l;
+                    raise_lwt e)
+       in
+       lwt l' = Lwt_stream.to_list (Lwt_stream.map_exn stream) in
+       return (l = l'));
 ]

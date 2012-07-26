@@ -65,23 +65,22 @@ type output
   (** Output mode *)
 
 (** Channel mode *)
+#if ocaml_version >= (3, 13)
+type 'a mode =
+  | Input : input mode
+  | Output : output mode
+#else
 type 'a mode =
     private
   | Input
   | Output
+#endif
 
 val input : input mode
   (** [input] input mode representation *)
 
 val output : output mode
   (** [output] output mode representation *)
-
-(* With GADTs:
-
-   type 'a mode =
-     | Input : input mode
-     | Output : output mode
-*)
 
 type input_channel = input channel
     (** Type of input channels *)
@@ -186,6 +185,9 @@ val buffered : 'a channel -> int
 
 val flush : output_channel -> unit Lwt.t
   (** [flush oc] performs all pending writes on [oc] *)
+
+val flush_all : unit -> unit Lwt.t
+  (** [flush_all ()] flushes all open output channels *)
 
 val buffer_size : 'a channel -> int
   (** Returns the size of the internal buffer. *)

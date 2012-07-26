@@ -34,23 +34,23 @@
     returns a sleeping threads which is waked up when the operation
     completes.
 
-    Moreover all sleeping threads returned by function of this modules
-    are {b cancelable}, this means that you can cancel them with
-    {!Lwt.cancel}. For example if you want to read something from a {b
-    file descriptor} with a timeout, you can cancel the action after
-    the timeout and the reading will not be performed if not already
-    done.
+    Most operations on sockets and pipes (on Windows it is only
+    sockets) are {b cancelable}, this means that you can cancel them
+    with {!Lwt.cancel}. For example if you want to read something from
+    a {b file descriptor} with a timeout, you can cancel the action
+    after the timeout and the reading will not be performed if not
+    already done.
 
-    More precisely, assuming that you have two {b file descriptor}
-    [fd1] and [fd2] and you want to read something from [fd1] or
-    exclusively from [fd2], and fail with an exception if a timeout of
-    1 second expires, without reading anything from [fd1] and [fd2],
-    even if they become readable in the future.
+    More precisely, assuming that you have two sockets [sock1] and
+    [sock2] and you want to read something from [sock1] or exclusively
+    from [sock2], and fail with an exception if a timeout of 1 second
+    expires, without reading anything from [sock1] and [sock2], even
+    if they become readable in the future.
 
     Then you can do:
 
     {[
-      Lwt.pick [Lwt_unix.timeout 1.0; read fd1 buf1 ofs1 len1; read fd2 buf2 ofs2 len2]
+      Lwt.pick [Lwt_unix.timeout 1.0; read sock1 buf1 ofs1 len1; read sock2 buf2 ofs2 len2]
     ]}
 
     In this case it is guaranteed that exactly one of the three
@@ -143,8 +143,8 @@ exception Timeout
   (** Exception raised by timeout operations *)
 
 val timeout : float -> 'a Lwt.t
-  (** [timeout d] is a threads which remain suspended for [d] seconds
-      then fail with {!Timeout} *)
+  (** [timeout d] is a thread which remains suspended for [d] seconds
+      then fails with {!Timeout} *)
 
 val with_timeout : float -> (unit -> 'a Lwt.t) -> 'a Lwt.t
   (** [with_timeout d f] is a short-hand for:
@@ -183,14 +183,14 @@ val state : file_descr -> state
 
 val unix_file_descr : file_descr -> Unix.file_descr
   (** Returns the underlying unix {b file descriptor}. It always
-      succeed, even if the {b file descriptor}'s state is not
+      succeeds, even if the {b file descriptor}'s state is not
       {!Open}. *)
 
 val of_unix_file_descr : ?blocking : bool -> ?set_flags : bool -> Unix.file_descr -> file_descr
   (** Creates a lwt {b file descriptor} from a unix one.
 
-      [blocking] is the blocking mode of the file-descriptor, it
-      describe how Lwt will use it. In non-blocking mode, read/write
+      [blocking] is the blocking mode of the file-descriptor, and
+      describes how Lwt will use it. In non-blocking mode, read/write
       on this file descriptor are made using non-blocking IO; in
       blocking mode they are made using the current async method.  If
       [blocking] is not specified it is guessed according to the file
@@ -222,7 +222,7 @@ val abort : file_descr -> exn -> unit
       descriptor fail with the given exception. This put the {b file
       descriptor} into the {!Aborted} state.
 
-      If the {b file descrptor} is closed, this does nothing, if it is
+      If the {b file descriptor} is closed, this does nothing, if it is
       aborted, this replace the abort exception by [exn].
 
       Note that this only works for reading and writing operations on
@@ -233,7 +233,13 @@ val abort : file_descr -> exn -> unit
 val fork : unit -> int
   (** [fork ()] does the same as [Unix.fork]. You must use this
       function instead of [Unix.fork] when you want to use Lwt in the
-      child process. *)
+      child process.
+
+      Notes:
+      - in the child process all pending jobs are canceled,
+      - if you are going to use Lwt in the parent and the child, it is
+        a good idea to call {!Lwt_io.flush_all} before callling
+        {!fork} to avoid double-flush. *)
 
 type process_status =
     Unix.process_status =
@@ -273,7 +279,10 @@ val wait_count : unit -> int
       terminate. *)
 
 val system : string -> process_status Lwt.t
-  (** Wrapper for [Unix.system] *)
+  (** Executes the given command, waits until it terminates, and
+      return its termination status. The string is interpreted by the
+      shell [/bin/sh] on Unix and [cmd.exe] on Windows. The result
+      [WEXITED 127] indicates that the shell couldn't be executed. *)
 
 (** {6 Basic file input/output} *)
 
@@ -303,6 +312,9 @@ type open_flag =
   | O_DSYNC
   | O_SYNC
   | O_RSYNC
+#if ocaml_version >= (3, 13)
+  | O_SHARE_DELETE
+#endif
 
 val openfile : string -> open_flag list -> file_perm -> file_descr Lwt.t
   (** Wrapper for [Unix.openfile]. *)
@@ -517,8 +529,8 @@ val readdir : dir_handle -> string Lwt.t
 
 val readdir_n : dir_handle -> int -> string array Lwt.t
   (** [readdir_n handle count] reads at most [count] entry from the
-      given directory. It is more efficient that callling [count]
-      times [readdir]. If the length of the returned array is smaller
+      given directory. It is more efficient than calling [readdir]
+      [count] times. If the length of the returned array is smaller
       than [count], this means that the end of the directory has been
       reached. *)
 
@@ -626,6 +638,12 @@ val disable_signal_handler : signal_handler_id -> unit
 
 val signal_count : unit -> int
   (** Returns the number of registered signal handler. *)
+
+val reinstall_signal_handler : int -> unit
+  (** [reinstall_signal_handler signum] if any signal handler is
+      registered for this signal with {!on_signal}, it reinstall the
+      signal handler (with [Sys.set_signal]). This is usefull in case
+      another part of the program install another signal handler. *)
 
 (** {6 Sockets} *)
 
@@ -751,7 +769,12 @@ type credentials = {
 
 val get_credentials : file_descr -> credentials
   (** [get_credentials fd] returns credential informations from the
-      given socket. *)
+      given socket. On some platforms, obtaining the peer pid is not
+      possible and it will be set to [-1]. If obtaining credentials 
+      is not possible on the current system, it raises
+      [Lwt_sys.Not_available "get_credentials"].
+
+      This call is not available on windows. *)
 
 (** {8 Socket options} *)
 
@@ -1023,23 +1046,53 @@ val register_action : io_event -> file_descr -> (unit -> 'a) -> 'a Lwt.t
   *)
 
 type 'a job
-  (** Type of jobs that run:
-
-      - on another thread if the current async method is [Async_thread]
-      - on the main thread if the current async method is [Async_none]. *)
+  (** Type of job descriptions. A job description describe how to call
+      a C function and how to get its result. The C function may be
+      executed in another system thread. *)
 
 val execute_job :
   ?async_method : async_method ->
   job : 'a job ->
   result : ('a job -> 'b) ->
   free : ('a job -> unit) -> 'b Lwt.t
-  (** [execute_job ?async_method ~job ~get ~free] starts
-      [job] and wait for its termination.
+  (** This is the old and deprecated way of running a job. Use
+      {!run_job} in new code. *)
 
-      [async_method] is how the job will be executed. It defaults to
-      the async method of the current thread. [result] is used to get
-      the result of the job, and [free] to free its associated
-      resources. *)
+val run_job : ?async_method : async_method -> 'a job -> 'a Lwt.t
+  (** [run_job ?async_method job] starts [job] and wait for its
+      termination.
+
+      The async method is choosen follow:
+      - if the optional parameter [async_method] is specified, it is
+        used,
+      - otherwise if the local key {!async_method_key} is set in the
+        current thread, it is used,
+      - otherwise the default method (returned by
+        {!default_async_method}) is used.
+
+      If the method is {!Async_none} then the job is run synchronously
+      and may block the current system thread, thus blocking all Lwt
+      threads.
+
+      If the method is {!Async_detach} then the job is run in another
+      system thread, unless the the maximum number of worker threads
+      has been reached (as given by {!pool_size}).
+
+      If the method is {!Async_switch} then the job is run
+      synchronously and if it blocks, execution will continue in
+      another system thread (unless the limit is reached).
+  *)
+
+val abort_jobs : exn -> unit
+  (** [abort_jobs exn] make all pending jobs to fail with exn. Note
+      that this does not abort the real job (i.e. the C function
+      executing it), just the lwt thread for it. *)
+
+val cancel_jobs : unit -> unit
+  (** [cancel_jobs ()] is the same as [abort_jobs Lwt.Canceled]. *)
+
+val wait_for_jobs : unit -> unit Lwt.t
+  (** Wait for all pending jobs to terminate. *)
 
 (** {6 Notifications} *)
 
@@ -1063,6 +1116,10 @@ val stop_notification : int -> unit
   (** Stop the given notification. Note that you should not reuse the
       id after the notification has been stopped, the result is
       unspecified if you do so. *)
+
+val call_notification : int -> unit
+  (** Call the handler associated to the given notification. Note that
+      if the notification was defined with [once = true] it is removed. *)
 
 val set_notification : int -> (unit -> unit) -> unit
   (** [set_notification id f] replace the function associated to the

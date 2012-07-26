@@ -27,7 +27,7 @@ let ( <=> ) v v' =
   assert ( state v = v')
 
 let test_exn f v e =
-  assert ( try f v;assert false with exn -> exn = e)
+  assert (try f v; false with exn -> exn = e)
 
 let f x = return ("test"^x)
 let g x = ("test"^x)
@@ -35,6 +35,17 @@ let g x = ("test"^x)
 exception Exn
 
 let key : int key = new_key ()
+
+let with_async_exception_hook hook f =
+  let save = !Lwt.async_exception_hook in
+  Lwt.async_exception_hook := hook;
+  try
+    let x = f () in
+    Lwt.async_exception_hook := save;
+    x
+  with exn ->
+    Lwt.async_exception_hook := save;
+    raise exn
 
 let suite = suite "lwt" [
   test "0"
@@ -159,16 +170,21 @@ let suite = suite "lwt" [
        assert ( poll t = None );
        return true);
 
-  test "15"
+  test_direct "15.1"
     (fun () ->
-       let t,w = wait () in
-       assert ( ignore_result t = () );
-       wakeup w ();
-       let t,w = wait () in
-       ignore_result t;
-       (* XXX c'est quand meme un comportement bizare *)
-       test_exn (wakeup_exn w) Exn Exn;
-       return true);
+       let exns = ref [] in
+       with_async_exception_hook
+         (fun e -> exns := e :: !exns)
+         (fun () ->
+            let t, w = wait () in
+            ignore_result t;
+            wakeup w ();
+            assert (!exns = []);
+            let t, w = wait () in
+            ignore_result t;
+            wakeup_exn w Exn;
+            assert (!exns = [Exn]);
+            true));
 
   test "16"
     (fun () ->
@@ -207,7 +223,6 @@ let suite = suite "lwt" [
     (fun () ->
        let t,w = task () in
        on_cancel t (fun () -> ());
-       on_cancel t (fun () -> raise Exn);
        on_cancel (return ()) (fun () -> assert false);
        cancel t;
        on_cancel t (fun () -> ());
@@ -281,7 +296,7 @@ let suite = suite "lwt" [
     (fun () ->
        let t,w = wait () in
        wakeup w ();
-       test_exn (wakeup w) () (Invalid_argument "Lwt.wakeup");
+       test_exn (wakeup w) () (Invalid_argument "Lwt.wakeup_result");
        return true);
 
   test "28"
@@ -549,4 +564,92 @@ let suite = suite "lwt" [
             in
             wakeup wakener ();
             t));
+
+
+  test "on_cancel race condition"
+    (fun () ->
+       (* Queue of cancel-able pending threads. *)
+       let queue = Lwt_sequence.create () in
+       (* Add two cancel-able pending threads to the queue. *)
+       let waiter1, wakener1 = task () in
+       let node1 = Lwt_sequence.add_r wakener1 queue in
+       let waiter2, wakener2 = task () in
+       let node2 = Lwt_sequence.add_r wakener2 queue in
+       (* Remove nodes when a thread is canceled. *)
+       on_cancel waiter1 (fun () -> Lwt_sequence.remove node1);
+       on_cancel waiter2 (fun () -> Lwt_sequence.remove node2);
+       (* Add another one to the left of the on_cancel one: *)
+       let waiter', wakener' = wait () in
+       let t = bind waiter' (fun _ -> waiter1) in
+       (* Send a value to the first thread of the queue when [t]
+          fails. *)
+       ignore (
+         try_lwt
+           t
+         with _ ->
+           (* Take the first thread from the queue and send it a value. *)
+           wakeup (Lwt_sequence.take_l queue) 42;
+           return 0
+       );
+       (* Terminate [waiter'] so [waiter1 <- Repr t] *)
+       wakeup wakener' 0;
+       (* now there are two thunk functions on [t]:
+          - (fun _ -> wakeup (Lwt_sequence.take_l queue) 42; return 0);
+          - (fun _ -> Lwt_sequence.remove node); *)
+       (* Cancel [waiter1]. If on_cancel handlers are not executed
+          before other thunk functions, [42] is lost. *)
+       cancel waiter1;
+       return (state waiter1 = Fail Canceled && state waiter2 = Return 42));
+
+  test "re-cancel"
+    (fun () ->
+       let waiter1, wakener1 = task () in
+       let waiter2, wakener2 = task () in
+       let waiter3, wakener3 = task () in
+       let t1 = catch (fun () -> waiter1) (fun exn -> waiter2) in
+       let t2 = bind t1 return in
+       let t3 = bind waiter3 (fun () -> t1) in
+       wakeup wakener3 ();
+       cancel t3;
+       cancel t2;
+       return (List.for_all (fun t -> state t = Fail Canceled) [t1; t2; t3; waiter1; waiter2]));
+
+  test "re-cancel choose"
+    (fun () ->
+       let waiter1, wakener1 = task () in
+       let waiter2, wakener2 = task () in
+       let t1 = catch (fun () -> waiter1) (fun exn -> waiter2) in
+       let t2 = choose [t1] in
+       cancel t2;
+       cancel t2;
+       return (state waiter1 = Fail Canceled && state waiter2 = Fail Canceled));
+
+  test "ignore_result 2"
+    (fun () ->
+       let exns = ref [] in
+       with_async_exception_hook
+         (fun e -> exns := e :: !exns)
+         (fun () ->
+            let waiter, wakener = wait () in
+            let t1 = map (fun () -> 42) waiter in
+            ignore_result (
+              lwt () = waiter in
+              fail Exit
+            );
+            let t2 = map (fun () -> "42") waiter in
+            wakeup wakener ();
+            return (!exns = [Exit] && state t1 = Return 42 && state t2 = Return "42")));
+
+  test "on_success exn 2"
+    (fun () ->
+       let exns = ref [] in
+       with_async_exception_hook
+         (fun e -> exns := e :: !exns)
+         (fun () ->
+            let waiter, wakener = wait () in
+            let t1 = map (fun () -> 42) waiter in
+            on_success waiter (fun () -> raise Exit);
+            let t2 = map (fun () -> "42") waiter in
+            wakeup wakener ();
+            return (!exns = [Exit] && state t1 = Return 42 && state t2 = Return "42")));
 ]
