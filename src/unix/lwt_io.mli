@@ -288,6 +288,9 @@ val write_chars : output_channel -> char Lwt_stream.t -> unit Lwt.t
 val write : output_channel -> string -> unit Lwt.t
   (** [write oc str] writes all characters of [str] on [oc] *)
 
+val writes : output_channel -> string Lwt_stream.t -> unit Lwt.t
+  (** [write oc str] writes all characters of [str] on [oc] *)
+
 val write_line : output_channel -> string -> unit Lwt.t
   (** [write_line oc str] writes [str] on [oc] followed by a
       new-line. *)
