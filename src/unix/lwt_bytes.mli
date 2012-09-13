@@ -133,10 +133,12 @@ val send_msg : socket : Lwt_unix.file_descr -> io_vectors : io_vector list -> fd
 
 (** {6 Memory mapped files} *)
 
+(*
 val map_file : fd : Unix.file_descr -> ?pos : int64 -> shared : bool -> ?size : int -> unit -> t
   (** [map_file ~fd ?pos ~shared ?size ()] maps the file descriptor
       [fd] to an array of bytes. *)
 
+*)
 external mapped : t -> bool = "lwt_unix_mapped" "noalloc"
   (** [mapped buffer] returns [true] iff [buffer] is a memory mapped
       file. *)

@@ -5,7 +5,7 @@
 OASISFormat: 0.3
 OCamlVersion: >= 3.12
 Name: lwt
-Version: 2.4.0
+Version: 2.4.1
 LicenseFile: COPYING
 License: LGPL-2.1 with OCaml linking exception
 Authors:
@@ -134,7 +134,7 @@ Library "lwt-unix"
   InternalModules:
     Lwt_log_rules,
     Lwt_unix_jobs_generated
-  BuildDepends: lwt, unix, bigarray
+  BuildDepends: lwt, unix, cstruct
   XMETADescription: Unix support for lwt
   CSources:
     lwt_config.h,
@@ -339,98 +339,98 @@ Document "lwt-api"
 # | Examples                                                          |
 # +-------------------------------------------------------------------+
 
-Executable logging
-  Path: examples/unix
-  Build$: flag(unix)
-  Install: false
-  MainIs: logging.ml
-  BuildDepends: lwt.unix, lwt.syntax
-  CompiledObject: best
-
-Executable relay
-  Path: examples/unix
-  Build$: flag(unix)
-  Install: false
-  MainIs: relay.ml
-  BuildDepends: lwt.unix, lwt.syntax
-  CompiledObject: best
-
-Executable parallelize
-  Path: examples/unix
-  Build$: flag(unix)
-  Install: false
-  MainIs: parallelize.ml
-  BuildDepends: lwt.unix, lwt.syntax
-  CompiledObject: best
-
-# +-------------------------------------------------------------------+
-# | Tests                                                             |
-# +-------------------------------------------------------------------+
-
-Library test
-  Path: tests
-  Modules: Test
-  Install: false
-  Build$: flag(tests) && (flag(unix) || flag(all))
-  BuildDepends: lwt, unix, lwt.unix
-
-Executable test_core
-  Path: tests/core
-  Build$: flag(tests) && (flag(unix) || flag(all))
-  Install: false
-  CompiledObject: best
-  MainIs: main.ml
-  BuildDepends: test, lwt, unix, lwt.unix
-
-Executable test_unix
-  Path: tests/unix
-  Build$: flag(tests) && (flag(unix) || flag(all))
-  Install: false
-  CompiledObject: best
-  MainIs: main.ml
-  BuildDepends: test, lwt, unix, lwt.unix
-
-Executable test_react
-  Path: tests/react
-  Build$: flag(tests) && ((flag(unix) && flag(react)) || flag(all))
-  Install: false
-  CompiledObject: best
-  MainIs: main.ml
-  BuildDepends: test, lwt, unix, lwt.unix, react, lwt.react
-
-Executable test_preemptive
-  Path: tests/preemptive
-  Build$: flag(tests) && ((flag(preemptive) && flag(unix)) || flag(all))
-  Install: false
-  CompiledObject: best
-  MainIs: main.ml
-  BuildDepends: test, lwt, unix, lwt.unix, lwt.preemptive, threads
-
-Test core
-  Command: $test_core
-  TestTools: test_core
-  Run$: flag(tests) && (flag(unix) || flag(all))
-
-Test unix
-  Command: $test_unix
-  TestTools: test_unix
-  Run$: flag(tests) && (flag(unix) || flag(all))
-
-Test react
-  Command: $test_react
-  TestTools: test_react
-  Run$: flag(tests) && ((flag(unix) && flag(react)) || flag(all))
-
-Test preemptive
-  Command: $test_preemptive
-  TestTools: test_preemptive
-  Run$: flag(tests) && ((flag(preemptive) && flag(unix)) || flag(all))
-
-# +-------------------------------------------------------------------+
-# | Misc                                                              |
-# +-------------------------------------------------------------------+
-
-SourceRepository head
-  Type: darcs
-  Location: http://ocsigen.org/darcs/lwt
-  Browser: http://ocsigen.org/darcsweb/?r=lwt;a=summary
+# Executable logging
+#   Path: examples/unix
+#   Build$: flag(unix)
+#   Install: false
+#   MainIs: logging.ml
+#   BuildDepends: lwt.unix, lwt.syntax
+#   CompiledObject: best
+# 
+# Executable relay
+#   Path: examples/unix
+#   Build$: flag(unix)
+#   Install: false
+#   MainIs: relay.ml
+#   BuildDepends: lwt.unix, lwt.syntax
+#   CompiledObject: best
+# 
+# Executable parallelize
+#   Path: examples/unix
+#   Build$: flag(unix)
+#   Install: false
+#   MainIs: parallelize.ml
+#   BuildDepends: lwt.unix, lwt.syntax
+#   CompiledObject: best
+# 
+# # +-------------------------------------------------------------------+
+# # | Tests                                                             |
+# # +-------------------------------------------------------------------+
+# 
+# Library test
+#   Path: tests
+#   Modules: Test
+#   Install: false
+#   Build$: flag(tests) && (flag(unix) || flag(all))
+#   BuildDepends: lwt, unix, lwt.unix
+# 
+# Executable test_core
+#   Path: tests/core
+#   Build$: flag(tests) && (flag(unix) || flag(all))
+#   Install: false
+#   CompiledObject: best
+#   MainIs: main.ml
+#   BuildDepends: test, lwt, unix, lwt.unix
+# 
+# Executable test_unix
+#   Path: tests/unix
+#   Build$: flag(tests) && (flag(unix) || flag(all))
+#   Install: false
+#   CompiledObject: best
+#   MainIs: main.ml
+#   BuildDepends: test, lwt, unix, lwt.unix
+# 
+# Executable test_react
+#   Path: tests/react
+#   Build$: flag(tests) && ((flag(unix) && flag(react)) || flag(all))
+#   Install: false
+#   CompiledObject: best
+#   MainIs: main.ml
+#   BuildDepends: test, lwt, unix, lwt.unix, react, lwt.react
+# 
+# Executable test_preemptive
+#   Path: tests/preemptive
+#   Build$: flag(tests) && ((flag(preemptive) && flag(unix)) || flag(all))
+#   Install: false
+#   CompiledObject: best
+#   MainIs: main.ml
+#   BuildDepends: test, lwt, unix, lwt.unix, lwt.preemptive, threads
+# 
+# Test core
+#   Command: $test_core
+#   TestTools: test_core
+#   Run$: flag(tests) && (flag(unix) || flag(all))
+# 
+# Test unix
+#   Command: $test_unix
+#   TestTools: test_unix
+#   Run$: flag(tests) && (flag(unix) || flag(all))
+# 
+# Test react
+#   Command: $test_react
+#   TestTools: test_react
+#   Run$: flag(tests) && ((flag(unix) && flag(react)) || flag(all))
+# 
+# Test preemptive
+#   Command: $test_preemptive
+#   TestTools: test_preemptive
+#   Run$: flag(tests) && ((flag(preemptive) && flag(unix)) || flag(all))
+# 
+# # +-------------------------------------------------------------------+
+# # | Misc                                                              |
+# # +-------------------------------------------------------------------+
+# 
+# SourceRepository head
+#   Type: darcs
+#   Location: http://ocsigen.org/darcs/lwt
+#   Browser: http://ocsigen.org/darcsweb/?r=lwt;a=summary

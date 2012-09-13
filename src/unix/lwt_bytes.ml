@@ -268,10 +268,12 @@ let sendto fd buf pos len flags addr =
 (* +-----------------------------------------------------------------+
    | Memory mapped files                                             |
    +-----------------------------------------------------------------+ *)
+(*
 
 let map_file ~fd ?pos ~shared ?(size=(-1)) () =
   Array1.map_file fd ?pos char c_layout shared size
 
+*)
 external mapped : t -> bool = "lwt_unix_mapped" "noalloc"
 
 type advice =

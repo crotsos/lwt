@@ -1316,7 +1316,6 @@ let read_chars ic = Lwt_stream.from (fun _ -> read_char_opt ic)
 let write_chars oc chars = Lwt_stream.iter_s (fun char -> write_char oc char) chars
 let read_lines ic = Lwt_stream.from (fun _ -> read_line_opt ic)
 let write_lines oc lines = Lwt_stream.iter_s (fun line -> write_line oc line) lines
-let writes oc lines = Lwt_stream.iter_s (write oc) lines
 
 let zero =
   make
